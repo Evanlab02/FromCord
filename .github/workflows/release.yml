@@ -33,9 +33,6 @@ jobs:
       - name: Build Images
         run: |
           docker build -f Dockerfile -t fromcord:latest .
-      - name: Push Images
-        run: |
-          docker push fromcord:latest
       - name: Log in to registry
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u $ --password-stdin
       - name: Create Tags
