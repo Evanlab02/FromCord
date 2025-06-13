@@ -221,3 +221,40 @@ async def close(interaction: Interaction) -> None:
         await interaction.user.send(f"Session closed successfully! (ID: {session_id})")
     else:
         await interaction.user.send("FAILURE: Could not close session.")
+
+
+@group.command(name="boss", description="Set the boss for a session.")
+async def boss(
+    interaction: Interaction,
+    boss: Literal[
+        "Tricephalos",
+        "Gaping Jaw",
+        "Sentient Pest",
+        "Augur",
+        "Equilibrious Beast",
+        "Darkdrift Knight",
+        "Fissure In The Fog",
+        "Night Aspect",
+    ],
+) -> None:
+    """
+    Command to set the boss for a session.
+
+    Args:
+        interaction: The interaction object.
+        boss: The boss to set for the session.
+    """
+    log.info(f"User ({interaction.user.id}) is setting the boss for a session.")
+
+    guild = interaction.guild
+    if not guild:
+        log.error(GUILD_ERROR)
+        await interaction.response.send_message(GUILD_FAILURE)
+        return
+
+    result = await service.set_boss(interaction=interaction, guild=guild, boss=boss)
+
+    if result:
+        await interaction.response.send_message(f"Boss set to {boss}.")
+    else:
+        await interaction.response.send_message("FAILURE: Could not set boss.")

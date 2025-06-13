@@ -20,6 +20,30 @@ class SessionFlag(BaseModel):
     ROUND_2_CLOSED: bool = False
     LEVEL_5_7: bool = False
     LEVEL_10_12: bool = False
+    TRICEPHALOS_DAY_1: bool = False
+    TRICEPHALOS_DAY_2: bool = False
+    GAPING_JAW_DAY_1: bool = False
+    GAPING_JAW_DAY_2: bool = False
+    SENTIENT_PEST_DAY_1: bool = False
+    SENTIENT_PEST_DAY_2: bool = False
+    AUGUR_DAY_1: bool = False
+    AUGUR_DAY_2: bool = False
+    EQUILIBRIUM_DAY_1: bool = False
+    EQUILIBRIUM_DAY_2: bool = False
+    DARKDRIFT_KNIGHT_DAY_1: bool = False
+    DARKDRIFT_KNIGHT_DAY_2: bool = False
+    FISSURE_IN_THE_FOG_DAY_1: bool = False
+    FISSURE_IN_THE_FOG_DAY_2: bool = False
+    NIGHT_ASPECT_DAY_1: bool = False
+    NIGHT_ASPECT_DAY_2: bool = False
+    TRICEPHALOS_WEAKNESS: bool = False
+    GAPING_JAW_WEAKNESS: bool = False
+    SENTIENT_PEST_WEAKNESS: bool = False
+    AUGUR_WEAKNESS: bool = False
+    EQUILIBRIUM_WEAKNESS: bool = False
+    DARKDRIFT_KNIGHT_WEAKNESS: bool = False
+    FISSURE_IN_THE_FOG_WEAKNESS: bool = False
+    NIGHT_ASPECT_WEAKNESS: bool = False
 
 
 class Session(BaseModel):
@@ -37,3 +61,16 @@ class Session(BaseModel):
     event_log: list[list[str]]
     event_log_id: int
     flags: SessionFlag = SessionFlag()
+    boss: (
+        Literal[
+            "Tricephalos",
+            "Gaping Jaw",
+            "Sentient Pest",
+            "Augur",
+            "Equilibrious Beast",
+            "Darkdrift Knight",
+            "Fissure In The Fog",
+            "Night Aspect",
+        ]
+        | None
+    ) = None

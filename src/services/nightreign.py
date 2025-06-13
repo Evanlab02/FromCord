@@ -485,3 +485,50 @@ class NightreignService:
         self.data.pop(session_id)
 
         return True, session_id
+
+    async def set_boss(
+        self,
+        interaction: Interaction,
+        guild: Guild,
+        boss: Literal[
+            "Tricephalos",
+            "Gaping Jaw",
+            "Sentient Pest",
+            "Augur",
+            "Equilibrious Beast",
+            "Darkdrift Knight",
+            "Fissure In The Fog",
+            "Night Aspect",
+        ],
+    ) -> bool:
+        """
+        Set the boss for a session.
+
+        Args:
+            interaction: The interaction object.
+            guild: The guild object.
+            boss: The boss to set for the session.
+        """
+        channel = interaction.channel
+        if not channel:
+            return False
+
+        if not isinstance(channel, TextChannel):
+            return False
+
+        session_id = channel.name.split("-")[-1]
+        session = self.get(session_id)
+        if not session:
+            return False
+
+        if session.guild_id != guild.id:
+            return False
+
+        if session.channel_id != channel.id:
+            return False
+
+        if interaction.user.id not in session.members:
+            return False
+
+        session.boss = boss
+        return True
