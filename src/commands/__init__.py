@@ -1,13 +1,13 @@
-"""
-This module contains the commands for the project.
-"""
+"""This module contains the commands for the project."""
 
-from discord.app_commands import CommandTree
+from src.commands.config import group as CONFIG_COMMAND_GROUP
+from src.commands.help import group as HELP_COMMAND_GROUP
+from src.commands.management import group as MANAGEMENT_COMMAND_GROUP
+from src.commands.nightreign import group as NIGHTREIGN_COMMAND_GROUP
 
-from src import CLIENT
-from src.commands.nightreign import group as NR_GROUP
-
-tree = CommandTree(CLIENT)
-tree.add_command(NR_GROUP)
-
-__all__ = ["tree"]
+__all__ = [
+    "CONFIG_COMMAND_GROUP",
+    "HELP_COMMAND_GROUP",
+    "MANAGEMENT_COMMAND_GROUP",
+    "NIGHTREIGN_COMMAND_GROUP",
+]

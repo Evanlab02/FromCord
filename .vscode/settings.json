@@ -1,0 +1,33 @@
+{
+    "python.analysis.autoImportCompletions": true,
+    "[python]": {
+        "editor.defaultFormatter": "ms-python.black-formatter",
+        "editor.formatOnSave": true,
+        "editor.codeActionsOnSave": {
+            "source.organizeImports": "explicit"
+        }
+    },
+    "isort.args": [
+        "--profile",
+        "black"
+    ],
+    "files.exclude": {
+        "**/__pycache__": true,
+        "**/.mypy_cache": true,
+        ".pytest_cache": true,
+        ".coverage": true,
+        "htmlcov": true,
+        "coverage.xml": true,
+        "debug.log": true,
+        "node_modules": true,
+        ".venv": true,
+    },
+    "mypy-type-checker.severity": {
+        "error": "Error",
+        "note": "Information"
+    },
+    "mypy-type-checker.args": [
+        "--strict"
+    ],
+    "python.analysis.typeCheckingMode": "off",
+}

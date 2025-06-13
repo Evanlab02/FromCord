@@ -1,234 +1,223 @@
-"""
-This module contains the commands for the project.
-"""
+"""This module contains the commands for nightreign."""
 
-import json
 import logging
-import os
-
+from typing import Literal
 from uuid import uuid4
 
-from discord import Interaction, PermissionOverwrite, TextChannel
+from discord import Interaction
 from discord.app_commands import Group
 
-NIGHTREIGN_GUILD_CATEGORY = int(os.getenv("NIGHTREIGN_GUILD_CATEGORY", 0))
-GUILD_FAILURE_MESSAGE = "FAILURE: Could not determine the guild."
-INCORRECT_CATEGORY_CHANNEL_MESSAGE = "FAILURE: Could not determine the category."
-INCORRECT_SESSION_MESSAGE = "FAILURE: This is not a nightreign session."
-SESSIONS_FILE = "data/sessions.json"
+from src import nightreign_service as service
 
 log = logging.getLogger(__name__)
-group = Group(name="nightreign", description="Nightreign commands")
+group = Group(name="nightreign", description="Commands for elden ring nightreign.")
+
+GUILD_ERROR = "Could not determine the guild."
+GUILD_FAILURE = f"FAILURE: {GUILD_ERROR}"
 
 
-@group.command(name="create", description="Create a new nightreign session")
-async def create(interaction: Interaction):
+@group.command(name="create", description="Create a session.")
+async def create(
+    interaction: Interaction,
+    session_id: str | None = None,
+    privacy: Literal["public", "private"] | None = None,
+) -> None:
     """
-    This is the command to create a new nightreign session.
-    """
-    guild = interaction.guild
-    if not guild:
-        await interaction.response.send_message(GUILD_FAILURE_MESSAGE)
-        return
+    Command to create a session.
 
-    session_id = uuid4().hex
-    await interaction.response.send_message(
-        f"Creating Nightreign Session (Session ID: {session_id}) ..."
+    Args:
+        interaction: The interaction object.
+        session_id: The session ID.
+        session_pw: The session password.
+        privacy: The privacy of the session (public or private).
+    """
+    log.info(
+        f"User ({interaction.user.id}) is creating a session with ID {session_id}."
     )
-    channel = await guild.create_text_channel(
-        name=f"nightreign-{session_id}",
-        overwrites={
-            guild.default_role: PermissionOverwrite(read_messages=False),
-            guild.me: PermissionOverwrite(read_messages=True, send_messages=True),
-            interaction.user: PermissionOverwrite(read_messages=True, send_messages=True),  # type: ignore # noqa: E501
-        },
-        category=guild.get_channel(NIGHTREIGN_GUILD_CATEGORY),  # type: ignore
+    session_pw = uuid4().hex
+
+    guild = interaction.guild
+    if not guild:
+        log.error(GUILD_ERROR)
+        await interaction.response.send_message(GUILD_FAILURE)
+        return
+
+    if not session_id:
+        session_id = uuid4().hex
+
+    if not privacy:
+        privacy = "private"
+
+    await interaction.response.send_message(f"Creating session (ID: {session_id})...")
+    result = await service.create(
+        interaction=interaction,
+        guild=guild,
+        session_id=session_id,
+        session_pw=session_pw,
+        privacy=privacy,
     )
 
-    data: dict = {}
-    with open(SESSIONS_FILE, "r") as f:
-        data = json.load(f)
-
-    data[session_id] = {
-        "session_id": session_id,
-        "channel": channel.id,
-        "members": [interaction.user.id],
-    }
-
-    with open(SESSIONS_FILE, "w") as f:
-        json.dump(data, f, indent=4)
-
-    await channel.send(f"Welcome to the Nightreign Session\n\nSession Information:\nID: {session_id}\nChannel: {channel.mention}\nMembers: [{interaction.user.mention}]")  # noqa: E501
+    if result:
+        await interaction.followup.send(
+            f"Session created successfully! (ID: {session_id})"
+        )
+    else:
+        await interaction.followup.send("FAILURE: Could not create session.")
 
 
-@group.command(name="join", description="Join a nightreign session")
-async def join(interaction: Interaction, session_id: str):
+@group.command(name="join", description="Join a session.")
+async def join(interaction: Interaction, session_id: str) -> None:
     """
-    This is the command to join a nightreign session.
+    Command to join a session.
+
+    Args:
+        interaction: The interaction object.
+        session_id: The session ID.
     """
-    guild = interaction.guild
-    if not guild:
-        await interaction.response.send_message(GUILD_FAILURE_MESSAGE)
-        return
-
-    data: dict = {}
-    with open(SESSIONS_FILE, "r") as f:
-        data = json.load(f)
-
-    if len(data[session_id]["members"]) >= 3:
-        await interaction.response.send_message("FAILURE: This session is full.")
-        return
-
-    channel_id = data[session_id]["channel"]
-    channel: TextChannel | None = guild.get_channel(channel_id)  # type: ignore
-    if not channel:
-        await interaction.response.send_message(INCORRECT_CATEGORY_CHANNEL_MESSAGE)  # noqa: E501
-        return
-
-    if interaction.user.id in data[session_id]["members"]:
-        await interaction.response.send_message("FAILURE: You are already in this session.")
-        return
-
-    await channel.set_permissions(interaction.user, read_messages=True, send_messages=True)  # type: ignore # noqa: E501
-    await channel.send(f"{interaction.user.mention} has joined the session.")
-
-    data[session_id]["members"].append(interaction.user.id)
-
-    with open(SESSIONS_FILE, "w") as f:
-        json.dump(data, f, indent=4)
-
-    await interaction.response.send_message("You have joined the session.")
-
-
-@group.command(name="add", description="Add a user to a nightreign session")
-async def add(interaction: Interaction, user_id: str):
-    """
-    This is the command to add a user to a nightreign session.
-    """
-    user = int(user_id)
+    log.info(f"User ({interaction.user.id}) is joining a session with ID {session_id}.")
 
     guild = interaction.guild
     if not guild:
-        await interaction.response.send_message(GUILD_FAILURE_MESSAGE)
+        log.error(GUILD_ERROR)
+        await interaction.response.send_message(GUILD_FAILURE)
         return
 
-    channel: TextChannel = interaction.channel  # type: ignore
-    category = channel.category   # type: ignore
+    result = await service.join(
+        interaction=interaction,
+        session_id=session_id,
+        guild=guild,
+    )
 
-    if not category or not channel:
-        await interaction.response.send_message(INCORRECT_CATEGORY_CHANNEL_MESSAGE)  # noqa: E501
-        return
-
-    if category.id != NIGHTREIGN_GUILD_CATEGORY:
-        await interaction.response.send_message(INCORRECT_SESSION_MESSAGE)
-        return
-
-    if not channel.name.startswith("nightreign-"):
-        await interaction.response.send_message(INCORRECT_SESSION_MESSAGE)
-        return
-
-    data: dict = {}
-    with open(SESSIONS_FILE, "r") as f:
-        data = json.load(f)
-
-    session_id = channel.name.replace("nightreign-", "")
-    session_data = data[session_id]
-
-    if len(session_data["members"]) >= 3:
-        await interaction.response.send_message("FAILURE: This session is full.")
-        return
-
-    if user in session_data["members"]:
-        await interaction.response.send_message("FAILURE: This user is already in the session.")
-        return
-
-    member = guild.get_member(user)
-    if not member:
-        await interaction.response.send_message("FAILURE: Could not determine the user.")
-        return
-
-    await channel.set_permissions(member, read_messages=True, send_messages=True)  # type: ignore # noqa: E501
-    await channel.send(f"{member.mention} has been added to the session.")
-
-    data[session_id]["members"].append(member.id)
-
-    with open(SESSIONS_FILE, "w") as f:
-        json.dump(data, f, indent=4)
+    if result:
+        await interaction.response.send_message(
+            f"Session joined successfully! (ID: {session_id})"
+        )
+    else:
+        await interaction.response.send_message("FAILURE: Could not join session.")
 
 
-@group.command(name="close", description="Close a nightreign session")
-async def close(interaction: Interaction):
+@group.command(name="add", description="Add a user to a session.")
+async def add(interaction: Interaction, user: str) -> None:
     """
-    This is the command to close a nightreign session.
+    Command to add a user to a session.
+
+    Args:
+        interaction: The interaction object.
+        user: A string version of the user id.
     """
+    log.info(f"User ({interaction.user.id}) is adding user ({user}) to a session.")
+    user_id = int(user)
+
     guild = interaction.guild
     if not guild:
-        await interaction.response.send_message(GUILD_FAILURE_MESSAGE)
+        log.error(GUILD_ERROR)
+        await interaction.response.send_message(GUILD_FAILURE)
         return
 
-    channel: TextChannel = interaction.channel  # type: ignore
-    category = channel.category   # type: ignore
+    result, mention = await service.add(
+        interaction=interaction,
+        guild=guild,
+        user_id=user_id,
+    )
 
-    if not category or not channel:
-        await interaction.response.send_message(INCORRECT_CATEGORY_CHANNEL_MESSAGE)  # noqa: E501
-        return
-
-    if category.id != NIGHTREIGN_GUILD_CATEGORY:
-        await interaction.response.send_message(INCORRECT_SESSION_MESSAGE)
-        return
-
-    if not channel.name.startswith("nightreign-"):
-        await interaction.response.send_message(INCORRECT_SESSION_MESSAGE)
-        return
-
-    session_id = channel.name.replace("nightreign-", "")
-    await channel.delete()
-    await interaction.user.send(f"Nightreign session {session_id} closed.")  # noqa: E501
-
-    data: dict = {}
-    with open(SESSIONS_FILE, "r") as f:
-        data = json.load(f)
-
-    data.pop(session_id)
-
-    with open(SESSIONS_FILE, "w") as f:
-        json.dump(data, f, indent=4)
+    if result:
+        await interaction.response.send_message(f"User added to session: {mention}")
+    else:
+        await interaction.response.send_message(
+            "FAILURE: Could not add user to session."
+        )
 
 
-@group.command(name="prepare", description="Prepare a nightreign session")
-async def prepare(interaction: Interaction):
+@group.command(name="leave", description="Leave a session.")
+async def leave(interaction: Interaction) -> None:
     """
-    This is the command to prepare a nightreign session.
+    Command to leave a session.
+
+    Args:
+        interaction: The interaction object.
     """
+    log.info(f"User ({interaction.user.id}) is leaving a session.")
+
     guild = interaction.guild
     if not guild:
-        await interaction.response.send_message(GUILD_FAILURE_MESSAGE)
+        log.error(GUILD_ERROR)
+        await interaction.response.send_message(GUILD_FAILURE)
         return
 
-    channel: TextChannel = interaction.channel  # type: ignore
-    category = channel.category   # type: ignore
+    result, session_id = await service.leave(interaction=interaction, guild=guild)
 
-    if not category or not channel:
-        await interaction.response.send_message(INCORRECT_CATEGORY_CHANNEL_MESSAGE)  # noqa: E501
+    if result:
+        await interaction.response.send_message(
+            f"{interaction.user.mention} left the session."
+        )
+        await interaction.user.send(f"Left session (ID: {session_id})")
+    else:
+        await interaction.response.send_message("FAILURE: Could not leave session.")
+
+
+@group.command(name="list", description="List all sessions.")
+async def list(interaction: Interaction) -> None:
+    """
+    Command to list all sessions.
+
+    Args:
+        interaction: The interaction object.
+    """
+    log.info(f"User ({interaction.user.id}) is listing all sessions.")
+
+    guild = interaction.guild
+    if not guild:
+        log.error(GUILD_ERROR)
+        await interaction.response.send_message(GUILD_FAILURE)
         return
 
-    if category.id != NIGHTREIGN_GUILD_CATEGORY:
-        await interaction.response.send_message(INCORRECT_SESSION_MESSAGE)
+    sessions = service.list(guild)
+    await interaction.response.send_message(f"```\n{sessions}\n```")
+
+
+@group.command(name="start", description="Start a session.")
+async def start(interaction: Interaction, day: Literal[1, 2]) -> None:
+    """
+    Command to start a session.
+
+    Args:
+        interaction: The interaction object.
+        day: The day of the run.
+    """
+    log.info(f"User ({interaction.user.id}) is starting a session for day {day}.")
+
+    guild = interaction.guild
+    if not guild:
+        log.error(GUILD_ERROR)
+        await interaction.response.send_message(GUILD_FAILURE)
         return
 
-    if not channel.name.startswith("nightreign-"):
-        await interaction.response.send_message(INCORRECT_SESSION_MESSAGE)
+    result = await service.start(interaction=interaction, guild=guild, day=day)
+
+    if not result:
+        await interaction.response.send_message("FAILURE: Could not start session.")
+
+
+@group.command(name="close", description="Close a session.")
+async def close(interaction: Interaction) -> None:
+    """
+    Command to close a session.
+
+    Args:
+        interaction: The interaction object.
+        session_id: The session ID.
+    """
+    log.info(f"User ({interaction.user.id}) is closing a session.")
+
+    guild = interaction.guild
+    if not guild:
+        log.error(GUILD_ERROR)
+        await interaction.response.send_message(GUILD_FAILURE)
         return
 
-    session_id = channel.name.replace("nightreign-", "")
+    result, session_id = await service.close(interaction=interaction, guild=guild)
 
-    data: dict = {}
-    with open(SESSIONS_FILE, "r") as f:
-        data = json.load(f)
-
-    data[session_id]["prepare"] = True
-
-    with open(SESSIONS_FILE, "w") as f:
-        json.dump(data, f, indent=4)
-
-    await interaction.response.send_message("Nightreign session prepared. Type in !run in the channel to start the run on fromcord.")  # noqa: E501
+    if result:
+        await interaction.user.send(f"Session closed successfully! (ID: {session_id})")
+    else:
+        await interaction.user.send("FAILURE: Could not close session.")

@@ -1,193 +1,106 @@
-"""
-This module contains the client for the project.
-"""
+"""This module contains the primary client for the project."""
 
-import json
 import logging
-import os
+import sys
 
-from datetime import datetime
-
-from discord import Client, Message, Object, TextChannel
-from discord.app_commands import CommandTree
+from discord import Client, Object
+from discord.app_commands import CommandTree, Group
 from discord.ext import tasks
 
-SESSIONS_FILE = "data/sessions.json"
+from src import INTENTS, app_config, guild_config, nightreign_service
+from src.commands import (
+    CONFIG_COMMAND_GROUP,
+    HELP_COMMAND_GROUP,
+    MANAGEMENT_COMMAND_GROUP,
+    NIGHTREIGN_COMMAND_GROUP,
+)
+from src.config.interfaces import IAppConfigManager, IGuildConfigManager
+from src.services import NightreignService
+from src.tasks.nightreign import check_sessions
 
 
 class FromCordClient(Client):
-    """
-    This is the client for the project.
-    """
+    """This is the primary discord client for the project."""
 
-    def __init__(self, *args, **kwargs):
-        """
-        This is the constructor for the client.
-        """
+    def __init__(self, *args, **kwargs) -> None:  # type: ignore
+        """Initialize the client."""
         self.log = logging.getLogger(__name__)
+        self.app_config: IAppConfigManager = kwargs.pop("app_config")
+        self.guild_config: IGuildConfigManager = kwargs.pop("guild_config")
+        self.nightreign_service: NightreignService = kwargs.pop("nightreign_service")
+        self.tree: CommandTree | None = None
+        self.save_counter: int = 0
         super().__init__(*args, **kwargs)
-        self.primary_guild_id = int(os.getenv("PRIMARY_GUILD", 0))
-        self.tree = None
 
-    def set_tree(self, tree: CommandTree | None):
-        """
-        This is the method to set the command tree.
-        """
+    async def on_ready(self) -> None:
+        """Event handler for the on_ready event."""
+        if not self.tree:
+            self.log.error("Tree is not set.")
+            sys.exit(1)
+
+        self.log.info(f"Logged on as {self.user}!")
+        self.app_config.on_ready()
+        self.guild_config.on_ready()
+        self.nightreign_service.on_ready()
+        self.clean_and_save.start()
+        self.nightreign_loop.start()
+
+        self.log.info("Loading tree...")
+        commands = self.tree.get_commands()
+        self.log.info(f"Loaded {len(commands)} commands/groups.")
+
+        for command in commands:
+            if isinstance(command, Group):
+                self.log.info(f"==> Group: {command.name} - {command.description}")
+                for subcommand in command.commands:
+                    self.log.info(f"===> {subcommand.name} - {subcommand.description}")
+
+        self.log.info("Syncing primary guild commands...")
+        await self.tree.sync(guild=Object(id=self.app_config.get_primary_guild_id()))
+        await self.tree.sync(guild=Object(id=self.app_config.get_primary_guild_id()))
+
+        self.log.info("Syncing commands...")
+        await self.tree.sync()
+        await self.tree.sync()
+
+        self.log.info("Commands synced.")
+
+    def set_tree(self, tree: CommandTree) -> None:
+        """Set the tree."""
         self.tree = tree
 
-    async def on_ready(self):
-        """
-        This is the event handler for the on_ready event.
-        """
-        self.log.info(f'Logged on as {self.user}!')
-        self.log.info(f"Primary guild ID: {self.primary_guild_id}")
-        self.log.info('Syncing commands...')
-        await self.tree.sync(guild=Object(id=self.primary_guild_id))
-        await self.tree.sync()
-        self.log.info('Commands synced.')
-        self.core_sessions.start()
-
-    async def on_message(self, message: Message):
-        """
-        This is the event handler for the on_message event.
-        """
-        CATEGORY_ID = int(os.getenv("NIGHTREIGN_GUILD_CATEGORY", 0))
-
-        if message.author.bot:
-            return
-
-        try:
-            category = message.channel.category  # type: ignore
-
-            if not category or category.id != CATEGORY_ID:
-                return
-
-            if message.content.startswith("!run"):
-                session_id = message.channel.name.replace("nightreign-", "")  # type: ignore
-                data: dict = {}
-                with open(SESSIONS_FILE, "r") as f:
-                    data = json.load(f)
-
-                if data[session_id]["prepare"]:
-                    data[session_id]["active"] = True
-                    data[session_id]["timestamp"] = datetime.now().timestamp()
-
-                    with open(SESSIONS_FILE, "w") as f:
-                        json.dump(data, f, indent=4)
-
-                    await message.channel.send("Starting the fight against the Night Lord!\nGood luck & have fun!")  # noqa: E501
-                    await message.channel.send("Guideline: You should now be level 1.")
-        except Exception:
-            return
-
     @tasks.loop(seconds=5)
-    async def core_sessions(self) -> None:
-        """
-        This is the task to check the sessions.
-        """
-        self.log.info("Checking sessions...")
-        data: dict = {}
-        with open(SESSIONS_FILE, "r") as f:
-            data = json.load(f)
+    async def nightreign_loop(self) -> None:
+        """Task to check the sessions for the nightreign service."""
+        await check_sessions(self)
 
-        for _, session_data in data.items():
-            if session_data.get("active", False):
-                timestamp = session_data["timestamp"]
-                start_time = datetime.fromtimestamp(timestamp)
-                now = datetime.now()
-                diff = now - start_time
-                diff_seconds = diff.total_seconds()
-                diff_minutes = diff_seconds / 60
+    @tasks.loop(minutes=5)
+    async def clean_and_save(self) -> None:
+        """Task to save the files periodically."""
+        self.save_counter += 1
+        if self.save_counter == 1:
+            self.log.info("[TASK] Skipping first save...")
+            return
 
-                day1_ring1_start_warning_1 = session_data.get("day1_ring1_start_warning_1", None)
-                if diff_minutes >= 3.5 and not day1_ring1_start_warning_1:
-                    channel_id = session_data["channel"]
-                    channel: TextChannel = self.get_channel(channel_id)  # type: ignore
-                    if channel:
-                        await channel.send("Ring 1 is closing in approximately 1 minute.")
-                    session_data["day1_ring1_start_warning_1"] = True
-                    continue
+        self.log.info("[TASK] Cleaning up the sessions...")
+        await self.nightreign_service.clean(self)
 
-                day1_ring1_start_warning_2 = session_data.get("day1_ring1_start_warning_2", None)
-                if diff_minutes >= 4 and not day1_ring1_start_warning_2:
-                    channel_id = session_data["channel"]
-                    channel: TextChannel = self.get_channel(channel_id)  # type: ignore
-                    if channel:
-                        await channel.send("Ring 1 is closing in approximately 30 seconds.")
-                    session_data["day1_ring1_start_warning_2"] = True
-                    continue
+        self.log.info("[TASK] Saving all in-memory data to files...")
+        self.guild_config.save()
+        self.nightreign_service.save()
 
-                day1_ring1_start_warning_3 = session_data.get("day1_ring1_start_warning_3", None)
-                if diff_minutes >= 4.25 and not day1_ring1_start_warning_3:
-                    channel_id = session_data["channel"]
-                    channel: TextChannel = self.get_channel(channel_id)  # type: ignore
-                    if channel:
-                        await channel.send("Ring 1 is closing in approximately 15 seconds.")
-                    session_data["day1_ring1_start_warning_3"] = True
-                    continue
 
-                day1_ring1_start_warning_4 = session_data.get("day1_ring1_start_warning_4", None)
-                if diff_minutes >= 4.5 and not day1_ring1_start_warning_4:
-                    channel_id = session_data["channel"]
-                    channel: TextChannel = self.get_channel(channel_id)  # type: ignore
-                    if channel:
-                        await channel.send("Ring 1 is closing...")
-                    session_data["day1_ring1_start_warning_4"] = True
-                    continue
+CLIENT = FromCordClient(
+    intents=INTENTS,
+    app_config=app_config,
+    guild_config=guild_config,
+    nightreign_service=nightreign_service,
+)
 
-                day1_ring1_complete = session_data.get("day1_ring1_complete", None)
-                if diff_minutes >= 7.5 and not day1_ring1_complete:
-                    channel_id = session_data["channel"]
-                    channel: TextChannel = self.get_channel(channel_id)  # type: ignore
-                    if channel:
-                        await channel.send("Ring 1 is closed.")
-                    session_data["day1_ring1_complete"] = True
-                    continue
+TREE = CommandTree(CLIENT)
+TREE.add_command(CONFIG_COMMAND_GROUP)
+TREE.add_command(HELP_COMMAND_GROUP)
+TREE.add_command(MANAGEMENT_COMMAND_GROUP)
+TREE.add_command(NIGHTREIGN_COMMAND_GROUP)
 
-                day1_ring2_start_warning_1 = session_data.get("day1_ring2_start_warning_1", None)
-                if diff_minutes >= 10 and not day1_ring2_start_warning_1:
-                    channel_id = session_data["channel"]
-                    channel: TextChannel = self.get_channel(channel_id)  # type: ignore
-                    if channel:
-                        await channel.send("Ring 2 is closing in approximately 1 minute.")
-                    session_data["day1_ring2_start_warning_1"] = True
-                    continue
-
-                day1_ring2_start_warning_2 = session_data.get("day1_ring2_start_warning_2", None)
-                if diff_minutes >= 10.5 and not day1_ring2_start_warning_2:
-                    channel_id = session_data["channel"]
-                    channel: TextChannel = self.get_channel(channel_id)  # type: ignore
-                    if channel:
-                        await channel.send("Ring 2 is closing in approximately 30 seconds.")
-                    session_data["day1_ring2_start_warning_2"] = True
-                    continue
-
-                day1_ring2_start_warning_3 = session_data.get("day1_ring2_start_warning_3", None)
-                if diff_minutes >= 10.75 and not day1_ring2_start_warning_3:
-                    channel_id = session_data["channel"]
-                    channel: TextChannel = self.get_channel(channel_id)  # type: ignore
-                    if channel:
-                        await channel.send("Ring 2 is closing in approximately 15 seconds.")
-                    session_data["day1_ring2_start_warning_3"] = True
-                    continue
-
-                day1_ring2_start_warning_4 = session_data.get("day1_ring2_start_warning_4", None)
-                if diff_minutes >= 11 and not day1_ring2_start_warning_4:
-                    channel_id = session_data["channel"]
-                    channel: TextChannel = self.get_channel(channel_id)  # type: ignore
-                    if channel:
-                        await channel.send("Ring 2 is closing...")
-                    session_data["day1_ring2_start_warning_4"] = True
-                    continue
-
-                day1_ring2_complete = session_data.get("day1_ring2_complete", None)
-                if diff_minutes >= 14 and not day1_ring2_complete:
-                    channel_id = session_data["channel"]
-                    channel: TextChannel = self.get_channel(channel_id)  # type: ignore
-                    if channel:
-                        await channel.send("Ring 2 is closed.")
-                        await channel.send("Taking on the Day 1 Boss...\nGood luck & have fun!")
-                    session_data["day1_ring2_complete"] = True
-
-        with open(SESSIONS_FILE, "w") as f:
-            json.dump(data, f, indent=4)
+CLIENT.set_tree(TREE)

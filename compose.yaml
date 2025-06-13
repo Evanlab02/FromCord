@@ -1,0 +1,16 @@
+services:
+  fromcord:
+    container_name: fromcord
+    restart: always
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ./data:/app/data
+    develop:
+      watch:
+        - action: rebuild
+          path: ./src/
+          target: /app/src/
+    env_file:
+      - .env
